@@ -1,0 +1,33 @@
+<launch>
+  <arg name="project" default="lio_sam" />
+  <env name="ROSCONSOLE_CONFIG_FILE" value="$(find lio_sam)/custom_rosconsole.conf"/>
+  <param name="/use_sim_time" value="true"/>
+
+  <!-- Run MCL -->
+  <node pkg="mcl" type="mcl_node" name="mcl_node" output="screen"/>
+
+  <!-- Run LIO_SAM offline -->
+  <include file="$(find lio_sam)/launch/run_offline.launch" />
+
+  <!-- <node launch-prefix="xterm -e gdb -args" pkg="$(arg project)" type="$(arg project)_mapOptmization" name="$(arg project)_mapOptmization" output="screen" respawn="false"/> -->
+  <node pkg="$(arg project)" type="$(arg project)_mapOptmization" name="$(arg project)_mapOptmization" output="screen" respawn="false"/>
+
+  <!-- Publish sensors -->
+  <node pkg="rosbag" type="play" name="player" args="
+         /media/marwan/external_drive/IROS/wednesday/parking_lot_repeat_stroll_0_2021-03-03-16-40-15.bag
+         --topic /os_cloud_node/points /encoder_odom /imu/data
+         -r 1
+         -s 0
+         --clock"/>
+
+  <!-- Publish odom->base_link tf from odom msg -->
+  <node name="message_to_tf" pkg="message_to_tf" type="message_to_tf" output="screen">
+    <param name="frame_id" type="string" value="odom" />
+    <param name="child_frame_id" type="string" value="base_link" />
+    <param name="footprint_frame_id" type="string" value="base_link" />
+    <param name="stabilized_frame_id" type="string" value="base_link" />
+    <param name="odometry_topic" type="string" value="/encoder_odom" />
+  </node>
+
+  <node pkg="rviz" type="rviz" name="mcl_rviz" args="-d $(find mcl)/rviz/rviz.rviz" />
+</launch>

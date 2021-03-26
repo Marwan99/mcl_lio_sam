@@ -153,9 +153,24 @@ public:
   float globalMapVisualizationPoseDensity;
   float globalMapVisualizationLeafSize;
 
+  // long-term mapping
+  bool continueMapping;
+  bool pubTf;
+  std::string keyPosesFile;
+  std::string cornerKeyFramesDir;
+  std::string surfKeyFramesDir;
+  std::string graphFile;
+
   ParamServer()
   {
     nh.param<std::string>("/robot_id", robot_id, "roboat");
+
+    nh.param<bool>("lio_sam/continueMapping", continueMapping, false);
+    nh.param<bool>("lio_sam/pubTf", pubTf, true);
+    nh.param<std::string>("lio_sam/keyPosesFile", keyPosesFile, "");
+    nh.param<std::string>("lio_sam/cornerKeyFramesDir", cornerKeyFramesDir, "");
+    nh.param<std::string>("lio_sam/surfKeyFramesDir", surfKeyFramesDir, "");
+    nh.param<std::string>("lio_sam/graphFile", graphFile, "");
 
     nh.param<std::string>("lio_sam/pointCloudTopic", pointCloudTopic, "points_raw");
     nh.param<std::string>("lio_sam/imuTopic", imuTopic, "imu_correct");

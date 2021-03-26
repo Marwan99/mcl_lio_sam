@@ -13,8 +13,15 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
+#include <gtsam/slam/dataset.h>
 
 #include <gtsam/nonlinear/ISAM2.h>
+
+#include <geometry_msgs/PoseStamped.h>
+#include <std_srvs/Empty.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 using namespace gtsam;
 
@@ -70,8 +77,12 @@ public:
   ros::Subscriber subCloud;
   ros::Subscriber subGPS;
   ros::Subscriber subLoop;
+  ros::Subscriber subMCL;
+
+  ros::ServiceServer saveMapService;
 
   std::deque<nav_msgs::Odometry> gpsQueue;
+  std::deque<nav_msgs::Odometry> mclQueue;
   lio_sam::cloud_info cloudInfo;
 
   vector<pcl::PointCloud<PointType>::Ptr> cornerCloudKeyFrames;
@@ -143,18 +154,24 @@ public:
   Eigen::Affine3f incrementalOdometryAffineFront;
   Eigen::Affine3f incrementalOdometryAffineBack;
 
-  mapOptimization()
+  tf2_ros::Buffer tfBuffer;
+  tf2_ros::TransformListener tfListener;
+
+  bool use_mcl_for_init;
+
+  mapOptimization() : tfListener(tfBuffer)
   {
+    tfBuffer.setUsingDedicatedThread(true);
     ISAM2Params parameters;
     parameters.relinearizeThreshold = 0.1;
     parameters.relinearizeSkip = 1;
     isam = new ISAM2(parameters);
 
     pubKeyPoses = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/trajectory", 1);
-    pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_global", 1);
+    pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_global", 1, true);
     pubLaserOdometryGlobal = nh.advertise<nav_msgs::Odometry>("lio_sam/mapping/odometry", 1);
     pubLaserOdometryIncremental = nh.advertise<nav_msgs::Odometry>("lio_sam/mapping/odometry_incremental", 1);
-    pubPath = nh.advertise<nav_msgs::Path>("lio_sam/mapping/path", 1);
+    pubPath = nh.advertise<nav_msgs::Path>("lio_sam/mapping/path", 1, true);
 
     subCloud =
         nh.subscribe<lio_sam::cloud_info>("lio_sam/feature/cloud_info", 1, &mapOptimization::laserCloudInfoHandler,
@@ -164,6 +181,9 @@ public:
     subLoop = nh.subscribe<std_msgs::Float64MultiArray>("lio_loop/loop_closure_detection", 1,
                                                         &mapOptimization::loopInfoHandler, this,
                                                         ros::TransportHints().tcpNoDelay());
+
+    subMCL = nh.subscribe<nav_msgs::Odometry>("/mcl_odom", 200, &mapOptimization::mclHandler, this,
+                                              ros::TransportHints().tcpNoDelay());
 
     pubHistoryKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/icp_loop_closure_history_cloud", 1);
     pubIcpKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/icp_loop_closure_corrected_cloud", 1);
@@ -181,7 +201,193 @@ public:
                                                   surroundingKeyframeDensity);  // for surrounding key poses of
                                                                                 // scan-to-map optimization
 
+    saveMapService = nh.advertiseService("lio_sam/save_everything", &mapOptimization::saveEverything, this);
+
     allocateMemory();
+    use_mcl_for_init = false;
+    if (continueMapping)
+    {
+      ROS_INFO("Reading keyposes and keyframes...");
+
+      use_mcl_for_init = true;
+
+      // read keyposes and frames
+      char temp_char;
+      float time_stamp, x, y, z, roll, pitch, yaw;
+
+      std::ifstream csv_file;
+      csv_file.open(keyPosesFile);
+
+      // Skipping header file in CSV file
+      std::string temp_str;
+      std::getline(csv_file, temp_str);
+
+      PointType thisPose3D;
+      PointTypePose thisPose6D;
+      char file_name_buffer[16];  // xxxxxx.pcd
+
+      for (uint32_t i = 0; !csv_file.eof() && ros::ok(); i++)
+      {
+        sprintf(file_name_buffer, "/%06d.pcd", i);
+        std::string file_path(file_name_buffer);
+
+        csv_file >> time_stamp >> temp_char >> x >> temp_char >> y >> temp_char >> z >> temp_char >> roll >>
+            temp_char >> pitch >> temp_char >> yaw;
+
+        thisPose3D.x = x;
+        thisPose3D.y = y;
+        thisPose3D.z = z;
+        thisPose3D.intensity = i;
+        cloudKeyPoses3D->push_back(thisPose3D);
+
+        thisPose6D.x = thisPose3D.x;
+        thisPose6D.y = thisPose3D.y;
+        thisPose6D.z = thisPose3D.z;
+        thisPose6D.intensity = thisPose3D.intensity;  // this can be used as index
+        thisPose6D.roll = roll;
+        thisPose6D.pitch = pitch;
+        thisPose6D.yaw = yaw;
+        thisPose6D.time = time_stamp;
+        cloudKeyPoses6D->push_back(thisPose6D);
+
+        ROS_DEBUG_STREAM("Loading: " << file_path);
+
+        pcl::PointCloud<PointType>::Ptr corner_read_cloud(new pcl::PointCloud<PointType>);
+        if (pcl::io::loadPCDFile<PointType>(cornerKeyFramesDir + file_path, *corner_read_cloud) == -1)
+        {
+          ROS_ERROR_STREAM("Couldn't read file " << cornerKeyFramesDir + file_path);
+          return;
+        }
+        cornerCloudKeyFrames.push_back(corner_read_cloud);
+
+        pcl::PointCloud<PointType>::Ptr surf_read_cloud(new pcl::PointCloud<PointType>);
+        if (pcl::io::loadPCDFile<PointType>(surfKeyFramesDir + file_path, *surf_read_cloud) == -1)
+        {
+          ROS_ERROR_STREAM("Couldn't read file " << surfKeyFramesDir + file_path);
+          return;
+        }
+        surfCloudKeyFrames.push_back(surf_read_cloud);
+
+        // Populate map container
+        laserCloudMapContainer[static_cast<int>(i)] =
+            make_pair(*transformPointCloud(corner_read_cloud, &cloudKeyPoses6D->points[i]),
+                      *transformPointCloud(surf_read_cloud, &cloudKeyPoses6D->points[i]));
+      }
+      ROS_INFO("Done!");
+
+      // read graph and initialize it
+      ROS_INFO("Reading graph file...");
+      // TODO: double check this model for potential problems
+      Values::shared_ptr initial;
+      NonlinearFactorGraph::shared_ptr temp_graph;
+      boost::tie(temp_graph, initial) = gtsam::readG2o(graphFile, true);
+      ROS_INFO("Done!");
+      ROS_INFO("First optimisation...");
+      gtsam::noiseModel::Diagonal::shared_ptr priorModel =
+          gtsam::noiseModel::Diagonal::Variances((Vector(6) << 1e-6, 1e-6, 1e-6, 1e-4, 1e-4, 1e-4).finished());
+      gtsam::Key firstKey = 0;
+      for (const gtsam::Values::ConstKeyValuePair& key_value : *initial)
+      {
+        // std::cout << "Adding prior to g2o file " << key_value.key  << std::endl;
+        firstKey = key_value.key;
+        temp_graph->add(gtsam::PriorFactor<gtsam::Pose3>(firstKey, gtsam::Pose3(), priorModel));
+        break;
+      }
+
+      isam->update(*temp_graph, *initial);
+      isam->update();
+      isamCurrentEstimate = isam->calculateEstimate();
+      ROS_INFO("Done!");
+
+      ROS_INFO("Publishing old trajectory...");
+      // trick to publish previous path;
+      aLoopIsClosed = true;
+      correctPoses();
+
+      // No lidar availble at start up so set timestamp manually for publishing
+      timeLaserInfoStamp = ros::Time::now();
+      // Publish trajectory
+      publishFrames();
+
+      ROS_INFO("Done!");
+
+      // Publish global map for mcl to work
+      ROS_INFO("Publishing global map...");
+      publishGlobalMap();
+      ROS_INFO("Done!");
+
+      // Add initial point
+      ROS_INFO("Getting initial pose...");
+      // std::lock_guard<std::mutex> lock(mtx);
+      // saveKeyFramesAndFactor();
+      ROS_INFO("Done!");
+
+      ROS_INFO("---------------------------");
+    }  // end if continueMapping
+  }
+
+  bool saveEverything(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response)
+  {
+    // save surface and corner clouds to PCDs
+    ROS_INFO("Saving surface and corner clouds to PCDs...");
+    int unused;
+    unused = system(std::string("mkdir -p " + cornerKeyFramesDir).c_str());
+    unused = system(std::string("mkdir -p " + surfKeyFramesDir).c_str());
+    char file_name_buffer[100];  // xxxxxx.pcd
+
+    pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
+
+    // Assert both pointclouds are the same size.
+    ROS_ASSERT(surfCloudKeyFrames.size() == cornerCloudKeyFrames.size());
+
+    for (int i = 0; i < surfCloudKeyFrames.size(); i++)
+    {
+      sprintf(file_name_buffer, "/%06d.pcd", i);
+      string file_name(file_name_buffer);
+
+      pcl::io::savePCDFileBinary(cornerKeyFramesDir + file_name, *cornerCloudKeyFrames[i]);
+      pcl::io::savePCDFileBinary(surfKeyFramesDir + file_name, *surfCloudKeyFrames[i]);
+    }
+
+    ROS_INFO("Done!");
+
+    // save key poses to csv file
+    ROS_INFO("Saving key poses to CSV...");
+
+    if (keyPosesFile == "")
+    {
+      ROS_ERROR("keyPosesFile parameter is not set.");
+      return false;
+    }
+
+    std::ofstream csv_file;
+
+    csv_file.open(keyPosesFile);
+    csv_file << "#timestamp, tx, ty, tz, r, p, y\n";
+
+    for (int i = 0; i < cloudKeyPoses6D->size(); i++)
+    {
+      PointTypePose point = cloudKeyPoses6D->at(i);
+      csv_file << point.time << "," << point.x << "," << point.y << "," << point.z << "," << point.roll << ","
+               << point.pitch << ", " << point.yaw;
+      if (i + 1 < cloudKeyPoses6D->size())
+        csv_file << std::endl;
+    }
+
+    csv_file.close();
+    ROS_INFO("Done!");
+
+    // save graph
+    ROS_INFO("Saving graph...");
+    gtsam::writeG2o(isam->getFactorsUnsafe(), isamCurrentEstimate, graphFile);
+    ROS_INFO("Done!");
+
+    return true;  // Indicating service succeeded
+  }
+
+  void mclHandler(const nav_msgs::Odometry::ConstPtr& odom_msg)
+  {
+    mclQueue.push_back(*odom_msg);
   }
 
   void allocateMemory()
@@ -396,47 +602,20 @@ public:
 
   void publishGlobalMap()
   {
-    if (pubLaserCloudSurround.getNumSubscribers() == 0)
-      return;
+    // if (pubLaserCloudSurround.getNumSubscribers() == 0 || !continueMapping)
+    //   return;
 
     if (cloudKeyPoses3D->points.empty() == true)
       return;
 
-    pcl::KdTreeFLANN<PointType>::Ptr kdtreeGlobalMap(new pcl::KdTreeFLANN<PointType>());
-    ;
-    pcl::PointCloud<PointType>::Ptr globalMapKeyPoses(new pcl::PointCloud<PointType>());
-    pcl::PointCloud<PointType>::Ptr globalMapKeyPosesDS(new pcl::PointCloud<PointType>());
     pcl::PointCloud<PointType>::Ptr globalMapKeyFrames(new pcl::PointCloud<PointType>());
     pcl::PointCloud<PointType>::Ptr globalMapKeyFramesDS(new pcl::PointCloud<PointType>());
 
-    // kd-tree to find near key frames to visualize
-    std::vector<int> pointSearchIndGlobalMap;
-    std::vector<float> pointSearchSqDisGlobalMap;
-    // search near key frames to visualize
-    mtx.lock();
-    kdtreeGlobalMap->setInputCloud(cloudKeyPoses3D);
-    kdtreeGlobalMap->radiusSearch(cloudKeyPoses3D->back(), globalMapVisualizationSearchRadius, pointSearchIndGlobalMap,
-                                  pointSearchSqDisGlobalMap, 0);
-    mtx.unlock();
-
-    for (int i = 0; i < (int)pointSearchIndGlobalMap.size(); ++i)
-      globalMapKeyPoses->push_back(cloudKeyPoses3D->points[pointSearchIndGlobalMap[i]]);
-    // downsample near selected key frames
-    pcl::VoxelGrid<PointType> downSizeFilterGlobalMapKeyPoses;  // for global map visualization
-    downSizeFilterGlobalMapKeyPoses.setLeafSize(globalMapVisualizationPoseDensity, globalMapVisualizationPoseDensity,
-                                                globalMapVisualizationPoseDensity);  // for global map visualization
-    downSizeFilterGlobalMapKeyPoses.setInputCloud(globalMapKeyPoses);
-    downSizeFilterGlobalMapKeyPoses.filter(*globalMapKeyPosesDS);
-
     // extract visualized and downsampled key frames
-    for (int i = 0; i < (int)globalMapKeyPosesDS->size(); ++i)
+    for (int i = 0; i < (int)cloudKeyPoses3D->size(); ++i)
     {
-      if (pointDistance(globalMapKeyPosesDS->points[i], cloudKeyPoses3D->back()) > globalMapVisualizationSearchRadius)
-        continue;
-      int thisKeyInd = (int)globalMapKeyPosesDS->points[i].intensity;
-      *globalMapKeyFrames +=
-          *transformPointCloud(cornerCloudKeyFrames[thisKeyInd], &cloudKeyPoses6D->points[thisKeyInd]);
-      *globalMapKeyFrames += *transformPointCloud(surfCloudKeyFrames[thisKeyInd], &cloudKeyPoses6D->points[thisKeyInd]);
+      *globalMapKeyFrames += *transformPointCloud(cornerCloudKeyFrames[i], &cloudKeyPoses6D->points[i]);
+      *globalMapKeyFrames += *transformPointCloud(surfCloudKeyFrames[i], &cloudKeyPoses6D->points[i]);
     }
     // downsample visualized points
     pcl::VoxelGrid<PointType> downSizeFilterGlobalMapKeyFrames;  // for global map visualization
@@ -444,7 +623,7 @@ public:
                                                  globalMapVisualizationLeafSize);  // for global map visualization
     downSizeFilterGlobalMapKeyFrames.setInputCloud(globalMapKeyFrames);
     downSizeFilterGlobalMapKeyFrames.filter(*globalMapKeyFramesDS);
-    publishCloud(&pubLaserCloudSurround, globalMapKeyFramesDS, timeLaserInfoStamp, odometryFrame);
+    publishCloud(&pubLaserCloudSurround, globalMapKeyFrames, timeLaserInfoStamp, mapFrame);
   }
 
   void loopClosureThread()
@@ -499,7 +678,7 @@ public:
       if (cureKeyframeCloud->size() < 300 || prevKeyframeCloud->size() < 1000)
         return;
       if (pubHistoryKeyFrames.getNumSubscribers() != 0)
-        publishCloud(&pubHistoryKeyFrames, prevKeyframeCloud, timeLaserInfoStamp, odometryFrame);
+        publishCloud(&pubHistoryKeyFrames, prevKeyframeCloud, timeLaserInfoStamp, mapFrame);
     }
 
     // ICP Settings
@@ -524,7 +703,7 @@ public:
     {
       pcl::PointCloud<PointType>::Ptr closed_cloud(new pcl::PointCloud<PointType>());
       pcl::transformPointCloud(*cureKeyframeCloud, *closed_cloud, icp.getFinalTransformation());
-      publishCloud(&pubIcpKeyFrames, closed_cloud, timeLaserInfoStamp, odometryFrame);
+      publishCloud(&pubIcpKeyFrames, closed_cloud, timeLaserInfoStamp, mapFrame);
     }
 
     // Get pose transformation
@@ -674,7 +853,7 @@ public:
     visualization_msgs::MarkerArray markerArray;
     // loop nodes
     visualization_msgs::Marker markerNode;
-    markerNode.header.frame_id = odometryFrame;
+    markerNode.header.frame_id = mapFrame;
     markerNode.header.stamp = timeLaserInfoStamp;
     markerNode.action = visualization_msgs::Marker::ADD;
     markerNode.type = visualization_msgs::Marker::SPHERE_LIST;
@@ -690,7 +869,7 @@ public:
     markerNode.color.a = 1;
     // loop edges
     visualization_msgs::Marker markerEdge;
-    markerEdge.header.frame_id = odometryFrame;
+    markerEdge.header.frame_id = mapFrame;
     markerEdge.header.stamp = timeLaserInfoStamp;
     markerEdge.action = visualization_msgs::Marker::ADD;
     markerEdge.type = visualization_msgs::Marker::LINE_LIST;
@@ -734,7 +913,7 @@ public:
 
     static Eigen::Affine3f lastImuTransformation;
     // initialization
-    if (cloudKeyPoses3D->points.empty())
+    if (cloudKeyPoses3D->points.empty() || continueMapping)
     {
       transformTobeMapped[0] = cloudInfo.imuRollInit;
       transformTobeMapped[1] = cloudInfo.imuPitchInit;
@@ -1373,6 +1552,7 @@ public:
 
   void addOdomFactor()
   {
+    ROS_INFO("Adding lidar odom factor");
     if (cloudKeyPoses3D->points.empty())
     {
       noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Variances(
@@ -1388,7 +1568,9 @@ public:
       gtsam::Pose3 poseTo = trans2gtsamPose(transformTobeMapped);
       gtSAMgraph.add(BetweenFactor<Pose3>(cloudKeyPoses3D->size() - 1, cloudKeyPoses3D->size(),
                                           poseFrom.between(poseTo), odometryNoise));
-      initialEstimate.insert(cloudKeyPoses3D->size(), poseTo);
+
+      if (!use_mcl_for_init)
+        initialEstimate.insert(cloudKeyPoses3D->size(), poseTo);
     }
   }
 
@@ -1479,6 +1661,7 @@ public:
 
     for (int i = 0; i < (int)loopIndexQueue.size(); ++i)
     {
+      ROS_INFO("Adding loop closure factor");
       int indexFrom = loopIndexQueue[i].first;
       int indexTo = loopIndexQueue[i].second;
       gtsam::Pose3 poseBetween = loopPoseQueue[i];
@@ -1492,19 +1675,79 @@ public:
     aLoopIsClosed = true;
   }
 
+  bool addMCLFactor()
+  {
+    if (!mclQueue.size())
+    {
+      ROS_WARN("No mcl_odom yet...");
+      return false;
+    }
+
+    ROS_INFO("Adding MCL factor");
+
+    nav_msgs::Odometry odom_msg;
+
+    odom_msg = mclQueue.back();
+
+    geometry_msgs::PoseStamped pose_odom_msg, pose_map_msg;
+    pose_odom_msg.header = odom_msg.header;
+    pose_odom_msg.pose = odom_msg.pose.pose;
+    tfBuffer.transform(pose_odom_msg, pose_map_msg, "map");
+
+    // Get RPY from pose msg
+    tf2::Quaternion q;
+    tf2::fromMsg(pose_map_msg.pose.orientation, q);
+    tf2::Matrix3x3 m(q);
+    double roll, pitch, yaw;
+    m.getRPY(roll, pitch, yaw);
+
+    gtsam::Pose3 mcl_pose(
+        gtsam::Rot3::RzRyRx(roll, pitch, yaw),
+        gtsam::Point3(pose_map_msg.pose.position.x, pose_map_msg.pose.position.y, pose_map_msg.pose.position.z));
+    
+    ROS_ERROR_STREAM(mcl_pose);
+
+    noiseModel::Diagonal::shared_ptr priorNoise =
+        noiseModel::Diagonal::Variances((Vector(6) << odom_msg.pose.covariance[0], odom_msg.pose.covariance[7], 5.0,
+                                         0.3, 0.3, odom_msg.pose.covariance[35])
+                                            .finished());
+    gtSAMgraph.add(PriorFactor<Pose3>(cloudKeyPoses3D->size(), mcl_pose, priorNoise));
+
+    if (use_mcl_for_init)
+      initialEstimate.insert(cloudKeyPoses3D->size(), mcl_pose);
+
+    return true;
+  }
+
   void saveKeyFramesAndFactor()
   {
-    if (saveFrame() == false)
-      return;
+    if (continueMapping)
+    {
+      if (!addMCLFactor())
+        return;
+      addLoopFactor();
+      continueMapping = false;
+      ROS_INFO("System properly initalized!");
+    }
+    else
+    {
+      if (saveFrame() == false)
+        return;
 
-    // odom factor
-    addOdomFactor();
+      ROS_INFO("Adding new pose to the graph...");
 
-    // gps factor
-    addGPSFactor();
+      // odom factor
+      addOdomFactor();
 
-    // loop factor
-    addLoopFactor();
+      // gps factor
+      addGPSFactor();
+
+      // loop factor
+      addLoopFactor();
+
+      // MCL factor
+      addMCLFactor();
+    }
 
     // cout << "****************************************************" << endl;
     // gtSAMgraph.print("GTSAM Graph:\n");
@@ -1615,7 +1858,7 @@ public:
   {
     geometry_msgs::PoseStamped pose_stamped;
     pose_stamped.header.stamp = ros::Time().fromSec(pose_in.time);
-    pose_stamped.header.frame_id = odometryFrame;
+    pose_stamped.header.frame_id = mapFrame;
     pose_stamped.pose.position.x = pose_in.x;
     pose_stamped.pose.position.y = pose_in.y;
     pose_stamped.pose.position.z = pose_in.z;
@@ -1633,7 +1876,7 @@ public:
     // Publish odometry for ROS (global)
     nav_msgs::Odometry laserOdometryROS;
     laserOdometryROS.header.stamp = timeLaserInfoStamp;
-    laserOdometryROS.header.frame_id = odometryFrame;
+    laserOdometryROS.header.frame_id = mapFrame;
     laserOdometryROS.child_frame_id = "odom_mapping";
     laserOdometryROS.pose.pose.position.x = transformTobeMapped[3];
     laserOdometryROS.pose.pose.position.y = transformTobeMapped[4];
@@ -1648,7 +1891,7 @@ public:
         tf::createQuaternionFromRPY(transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]),
         tf::Vector3(transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5]));
     tf::StampedTransform trans_odom_to_lidar =
-        tf::StampedTransform(t_odom_to_lidar, timeLaserInfoStamp, odometryFrame, "lidar_link");
+        tf::StampedTransform(t_odom_to_lidar, timeLaserInfoStamp, mapFrame, "lidar_link");
     br.sendTransform(trans_odom_to_lidar);
 
     // Publish odometry for ROS (incremental)
@@ -1690,7 +1933,7 @@ public:
         }
       }
       laserOdomIncremental.header.stamp = timeLaserInfoStamp;
-      laserOdomIncremental.header.frame_id = odometryFrame;
+      laserOdomIncremental.header.frame_id = mapFrame;
       laserOdomIncremental.child_frame_id = "odom_mapping";
       laserOdomIncremental.pose.pose.position.x = x;
       laserOdomIncremental.pose.pose.position.y = y;
@@ -1709,9 +1952,9 @@ public:
     if (cloudKeyPoses3D->points.empty())
       return;
     // publish key poses
-    publishCloud(&pubKeyPoses, cloudKeyPoses3D, timeLaserInfoStamp, odometryFrame);
+    publishCloud(&pubKeyPoses, cloudKeyPoses3D, timeLaserInfoStamp, mapFrame);
     // Publish surrounding key frames
-    publishCloud(&pubRecentKeyFrames, laserCloudSurfFromMapDS, timeLaserInfoStamp, odometryFrame);
+    publishCloud(&pubRecentKeyFrames, laserCloudSurfFromMapDS, timeLaserInfoStamp, mapFrame);
     // publish registered key frame
     if (pubRecentKeyFrame.getNumSubscribers() != 0)
     {
@@ -1719,7 +1962,7 @@ public:
       PointTypePose thisPose6D = trans2PointTypePose(transformTobeMapped);
       *cloudOut += *transformPointCloud(laserCloudCornerLastDS, &thisPose6D);
       *cloudOut += *transformPointCloud(laserCloudSurfLastDS, &thisPose6D);
-      publishCloud(&pubRecentKeyFrame, cloudOut, timeLaserInfoStamp, odometryFrame);
+      publishCloud(&pubRecentKeyFrame, cloudOut, timeLaserInfoStamp, mapFrame);
     }
     // publish registered high-res raw cloud
     if (pubCloudRegisteredRaw.getNumSubscribers() != 0)
@@ -1728,13 +1971,13 @@ public:
       pcl::fromROSMsg(cloudInfo.cloud_deskewed, *cloudOut);
       PointTypePose thisPose6D = trans2PointTypePose(transformTobeMapped);
       *cloudOut = *transformPointCloud(cloudOut, &thisPose6D);
-      publishCloud(&pubCloudRegisteredRaw, cloudOut, timeLaserInfoStamp, odometryFrame);
+      publishCloud(&pubCloudRegisteredRaw, cloudOut, timeLaserInfoStamp, mapFrame);
     }
     // publish path
-    if (pubPath.getNumSubscribers() != 0)
+    if (pubPath.getNumSubscribers() != 0 || continueMapping)
     {
       globalPath.header.stamp = timeLaserInfoStamp;
-      globalPath.header.frame_id = odometryFrame;
+      globalPath.header.frame_id = mapFrame;
       pubPath.publish(globalPath);
     }
   }

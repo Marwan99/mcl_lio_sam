@@ -2,10 +2,13 @@
     <arg name="project" default="lio_sam" />
 
     <include file="$(find lio_sam)/launch/run_offline.launch" />
+    <node pkg="$(arg project)" type="$(arg project)_mapOptmization" name="$(arg project)_mapOptmization" output="screen" respawn="true"/>
 
-    <node pkg="rosbag" type="play" name="player" output="screen" args="-r 1 /media/marwan/external_drive/fyp/post_ouster_pkg_update/localization/localization_0_2021-02-13-16-06-39.bag" />
+    <node pkg="rosbag" type="play" name="player" output="screen" args="
+    -r 1
+    /media/marwan/external_drive/IROS/wednesday/parking_lot_teach_2021-03-03-16-33-05.bag" /> 
 
-    <node pkg="rosbag" type="record" name="recorder" output="screen" args="
+    <!-- <node pkg="rosbag" type="record" name="recorder" output="screen" args="
         /tf
         /tf_static
         /encoder_odom
@@ -16,6 +19,6 @@
         /lio_sam/mapping/map_global
         /lio_sam/mapping/cloud_registered
         /lio_sam/mapping/trajectory 
-        -o /home/marwan/localization_0_courtyard.bag" />
+        -o /home/marwan/localization_0_courtyard.bag" /> -->
 
 </launch>

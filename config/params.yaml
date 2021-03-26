@@ -1,5 +1,13 @@
 lio_sam:
 
+  # Long-term mapping
+  continueMapping: true
+  pubTf: false
+  graphFile: "/home/marwan/fyp/lt_data/mcl_lio_sam/run_0/g2o.graph"
+  keyPosesFile: "/home/marwan/fyp/lt_data/mcl_lio_sam/run_0/key_poses.csv"
+  surfKeyFramesDir: "/home/marwan/fyp/lt_data/mcl_lio_sam/run_0/surf_key_frames"
+  cornerKeyFramesDir: "/home/marwan/fyp/lt_data/mcl_lio_sam/run_0/corner_key_frames"
+
   # Topics
   pointCloudTopic: "/os_cloud_node/points"      # Point cloud data
   imuTopic: "/imu/data"                         # IMU data
