@@ -22,9 +22,8 @@
          -s 0"/>
 
   <!-- Run MCL -->
-  <node pkg="mcl" type="mcl_node" name="mcl_node" output="screen">
-    <param name="publish_tf" type="bool" value="false" />
-  </node>
+  <param name="/mcl/publish_tf" type="bool" value="false" />
+  <node pkg="mcl" type="mcl_node" name="mcl_node" output="screen"/>
 
   <!-- Publish odom->base_link tf from odom msg -->
   <!-- <node name="message_to_tf" pkg="message_to_tf" type="message_to_tf" output="screen">
