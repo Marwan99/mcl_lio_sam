@@ -213,7 +213,6 @@ public:
 
       // read keyposes and frames
       char temp_char;
-      float time_stamp, x, y, z, roll, pitch, yaw;
 
       std::ifstream csv_file;
       csv_file.open(keyPosesFile);
@@ -231,23 +230,21 @@ public:
         sprintf(file_name_buffer, "/%06d.pcd", i);
         std::string file_path(file_name_buffer);
 
-        csv_file >> time_stamp >> temp_char >> x >> temp_char >> y >> temp_char >> z >> temp_char >> roll >>
-            temp_char >> pitch >> temp_char >> yaw;
+        csv_file >> thisPose6D.time >> temp_char >>  // NOLINT
+            thisPose6D.x >> temp_char >>             // NOLINT
+            thisPose6D.y >> temp_char >>             // NOLINT
+            thisPose6D.z >> temp_char >>             // NOLINT
+            thisPose6D.roll >> temp_char >>          // NOLINT
+            thisPose6D.pitch >> temp_char >>         // NOLINT
+            thisPose6D.yaw;                          // NOLINT
 
-        thisPose3D.x = x;
-        thisPose3D.y = y;
-        thisPose3D.z = z;
+        thisPose3D.x = thisPose6D.x;
+        thisPose3D.y = thisPose6D.y;
+        thisPose3D.z = thisPose6D.z;
         thisPose3D.intensity = i;
         cloudKeyPoses3D->push_back(thisPose3D);
 
-        thisPose6D.x = thisPose3D.x;
-        thisPose6D.y = thisPose3D.y;
-        thisPose6D.z = thisPose3D.z;
-        thisPose6D.intensity = thisPose3D.intensity;  // this can be used as index
-        thisPose6D.roll = roll;
-        thisPose6D.pitch = pitch;
-        thisPose6D.yaw = yaw;
-        thisPose6D.time = time_stamp;
+        thisPose6D.intensity = i;  // this can be used as index
         cloudKeyPoses6D->push_back(thisPose6D);
 
         ROS_DEBUG_STREAM("Loading: " << file_path);
@@ -314,12 +311,6 @@ public:
       // Publish global map for mcl to work
       ROS_INFO("Publishing global map...");
       publishGlobalMap();
-      ROS_INFO("Done!");
-
-      // Add initial point
-      ROS_INFO("Getting initial pose...");
-      // std::lock_guard<std::mutex> lock(mtx);
-      // saveKeyFramesAndFactor();
       ROS_INFO("Done!");
 
       ROS_INFO("---------------------------");
@@ -553,7 +544,7 @@ public:
 
   void visualizeGlobalMapThread()
   {
-    ros::Rate rate(0.2);
+    ros::Rate rate(1.0);
     while (ros::ok())
     {
       rate.sleep();
@@ -754,6 +745,7 @@ public:
     for (int i = 0; i < (int)pointSearchIndLoop.size(); ++i)
     {
       int id = pointSearchIndLoop[i];
+      // && abs(copy_cloudKeyPoses6D->points[id].time - timeLaserInfoCur) < 50
       if (abs(copy_cloudKeyPoses6D->points[id].time - timeLaserInfoCur) > historyKeyframeSearchTimeDiff)
       {
         loopKeyPre = id;
@@ -1701,20 +1693,55 @@ public:
     double roll, pitch, yaw;
     m.getRPY(roll, pitch, yaw);
 
-    gtsam::Pose3 mcl_pose(
-        gtsam::Rot3::RzRyRx(roll, pitch, yaw),
-        gtsam::Point3(pose_map_msg.pose.position.x, pose_map_msg.pose.position.y, pose_map_msg.pose.position.z));
-    
-    ROS_ERROR_STREAM(mcl_pose);
+    // TODO: refactor this section to be more readable
 
-    noiseModel::Diagonal::shared_ptr priorNoise =
-        noiseModel::Diagonal::Variances((Vector(6) << odom_msg.pose.covariance[0], odom_msg.pose.covariance[7], 5.0,
-                                         0.3, 0.3, odom_msg.pose.covariance[35])
-                                            .finished());
-    gtSAMgraph.add(PriorFactor<Pose3>(cloudKeyPoses3D->size(), mcl_pose, priorNoise));
-
+    // Use MCL to set the initial estimate for the new pose in the graph?
+    // If not will be done by the lidar odometry.
+    // Should at least be used in initializing the estimate of the initial pose in a new mapping session.
     if (use_mcl_for_init)
+    {
+      // TODO: set the roll and pitch using the imu data. 
+      gtsam::Pose3 mcl_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, yaw),
+                            gtsam::Point3(pose_map_msg.pose.position.x, pose_map_msg.pose.position.y, 0.0));
+
+      noiseModel::Diagonal::shared_ptr priorNoise =
+          noiseModel::Diagonal::Variances((Vector(6) << 1e-2, 1e-2, odom_msg.pose.covariance[35],
+                                           odom_msg.pose.covariance[0], odom_msg.pose.covariance[7], 1e-2)
+                                              .finished());
+
+      gtSAMgraph.add(PriorFactor<Pose3>(cloudKeyPoses3D->size(), mcl_pose, priorNoise));
+
       initialEstimate.insert(cloudKeyPoses3D->size(), mcl_pose);
+
+      // Use lidar odometry later on.
+      use_mcl_for_init = false;
+    }
+
+    if (cloudInfo.imuAvailable)
+    {
+      Pose3 latestEstimate;
+      latestEstimate = isamCurrentEstimate.at<Pose3>(cloudKeyPoses3D->size() - 1);
+
+      // r --> IMU
+      // P --> IMU
+      // y --> MCL
+      // x --> MCL
+      // y --> MCL
+      // z --> latest z axis estimate
+      gtsam::Pose3 mcl_pose(
+          gtsam::Rot3::RzRyRx((double)cloudInfo.imuRollInit, (double)cloudInfo.imuPitchInit, yaw),
+          gtsam::Point3(pose_map_msg.pose.position.x, pose_map_msg.pose.position.y, latestEstimate.translation().z()));
+
+      ROS_ERROR_STREAM(odom_msg.pose.covariance[35] * 10 << " " << odom_msg.pose.covariance[0] * 5 << " "
+                                                         << odom_msg.pose.covariance[7] * 5);
+      noiseModel::Diagonal::shared_ptr priorNoise =
+          noiseModel::Diagonal::Variances((Vector(6) << 1e-2, 1e-2, odom_msg.pose.covariance[35] * 10,
+                                           odom_msg.pose.covariance[0] * 5, odom_msg.pose.covariance[7] * 5, 1.5)
+                                              .finished());
+      gtSAMgraph.add(PriorFactor<Pose3>(cloudKeyPoses3D->size(), mcl_pose, priorNoise));
+    }
+    else
+      return false;
 
     return true;
   }
@@ -1746,7 +1773,7 @@ public:
       addLoopFactor();
 
       // MCL factor
-      addMCLFactor();
+      // addMCLFactor();
     }
 
     // cout << "****************************************************" << endl;
