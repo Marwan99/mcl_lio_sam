@@ -1681,6 +1681,14 @@ public:
 
     odom_msg = mclQueue.back();
 
+    if (odom_msg.pose.covariance[35] < 0.01 || odom_msg.pose.covariance[0] < 0.01 || odom_msg.pose.covariance[7] < 0.01)
+    {
+      ROS_WARN_STREAM("Ignoring MCL factor, super low cov. yaw: " << odom_msg.pose.covariance[35]
+                                                                << ", x:" << odom_msg.pose.covariance[0]
+                                                                << ", y:" << odom_msg.pose.covariance[7]);
+      return false;
+    }
+
     geometry_msgs::PoseStamped pose_odom_msg, pose_map_msg;
     pose_odom_msg.header = odom_msg.header;
     pose_odom_msg.pose = odom_msg.pose.pose;
@@ -1715,6 +1723,7 @@ public:
 
       // Use lidar odometry later on.
       use_mcl_for_init = false;
+      return true;
     }
 
     if (cloudInfo.imuAvailable)
