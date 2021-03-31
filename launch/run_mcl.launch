@@ -16,23 +16,17 @@
 
   <!-- Publish sensors -->
   <node pkg="rosbag" type="play" name="player" args="
-         /media/marwan/external_drive/IROS/wednesday/parking_lot_repeat_stroll_4_2021-03-03-18-18-05.bag
-         --topic /os_cloud_node/points /encoder_odom /imu/data
-         -r 1
-         -s 0"/>
+         /media/marwan/external_drive/IROS/wednesday/court_yard_wed_repeat_night_2021-03-03-19-07-18.bag
+         --topic /os_cloud_node/points /encoder_odom /imu/data -r 1 -s 20"/>
 
   <!-- Run MCL -->
   <param name="/mcl/publish_tf" type="bool" value="false" />
-  <node pkg="mcl" type="mcl_node" name="mcl_node" output="screen"/>
+  <param name="/mcl/init_x" type="double" value="38.0" />
+  <param name="/mcl/init_y" type="double" value="13.0" />
+  <param name="/mcl/init_yaw" type="double" value="3.14" />
+  <param name="/mcl/trans_thresh" type="double" value="0.5" />
+  <node pkg="mcl" type="mcl_node" name="mcl_node" output="screen">
+    <!-- <remap from="/encoder_odom" to="/lio_sam/mapping/odometry"/> -->
+  </node>
 
-  <!-- Publish odom->base_link tf from odom msg -->
-  <!-- <node name="message_to_tf" pkg="message_to_tf" type="message_to_tf" output="screen">
-    <param name="frame_id" type="string" value="odom" />
-    <param name="child_frame_id" type="string" value="base_link" />
-    <param name="footprint_frame_id" type="string" value="base_link" />
-    <param name="stabilized_frame_id" type="string" value="base_link" />
-    <param name="odometry_topic" type="string" value="/encoder_odom" />
-  </node> -->
-
-  <node pkg="rviz" type="rviz" name="mcl_rviz" args="-d $(find mcl)/rviz/rviz.rviz" />
 </launch>
