@@ -29,16 +29,16 @@
     <!-- <remap from="/encoder_odom" to="/lio_sam/mapping/odometry"/> -->
   </node>
 
-  <node pkg="octomap_server" type="octomap_server_node" name="octomap_server" output="screen">
+  <include file="$(find segmenters_lib)/launch/demo.launch" />
+
+  <arg name="node_start_delay" default="15.0" /> 
+  <!-- args="/home/marwan/test.bt" -->
+  <node pkg="octomap_server" type="octomap_server_node" name="octomap_server" output="screen" args="/home/marwan/test.bt" launch-prefix="bash -c 'sleep $(arg node_start_delay); $0 $@' ">
     <param name="resolution" value="0.15" />
     <param name="frame_id" type="string" value="map" />
     <param name="base_frame_id" type="string" value="base_link" />
-    <param name="sensor_model/max_range" value="50.0" />
-    <param name="filter_ground" value="true" />
-    <param name="ground_filter/distance" value="0.2" />
-    <param name="ground_filter/angle" value="0.35" />
-    <param name="ground_filter/plane_distance" value="0.5" />
-    <remap from="cloud_in" to="/os_cloud_node/points" />
+    <param name="sensor_model/max_range" value="60.0" />
+    <remap from="cloud_in" to="/cloud_nonground" />
   </node>
 
 </launch>

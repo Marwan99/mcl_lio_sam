@@ -13,4 +13,14 @@
     -r 1
     /media/marwan/external_drive/IROS/wednesday/parking_lot_repeat_stroll_0_2021-03-03-16-40-15.bag" />
 
+    <include file="$(find segmenters_lib)/launch/demo.launch" />
+
+    <node pkg="octomap_server" type="octomap_server_node" name="octomap_server" output="screen">
+        <param name="resolution" value="0.15" />
+        <param name="frame_id" type="string" value="map" />
+        <param name="base_frame_id" type="string" value="base_link" />
+        <param name="sensor_model/max_range" value="60.0" />
+        <remap from="cloud_in" to="/cloud_nonground" />
+    </node>
+
 </launch>
