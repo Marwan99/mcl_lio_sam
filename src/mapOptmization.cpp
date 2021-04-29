@@ -73,6 +73,7 @@ public:
   ros::Publisher pubRecentKeyFrame;
   ros::Publisher pubCloudRegisteredRaw;
   ros::Publisher pubLoopConstraintEdge;
+  ros::Publisher pubRegisteredCloudLidarFrame;
 
   ros::Subscriber subCloud;
   ros::Subscriber subGPS;
@@ -193,6 +194,7 @@ public:
     pubRecentKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_local", 1);
     pubRecentKeyFrame = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/cloud_registered", 1);
     pubCloudRegisteredRaw = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/cloud_registered_raw", 1);
+    pubRegisteredCloudLidarFrame = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/cloud_registered_raw_lidar", 1);
 
     downSizeFilterCorner.setLeafSize(mappingCornerLeafSize, mappingCornerLeafSize, mappingCornerLeafSize);
     downSizeFilterSurf.setLeafSize(mappingSurfLeafSize, mappingSurfLeafSize, mappingSurfLeafSize);
@@ -2001,10 +2003,11 @@ public:
       publishCloud(&pubRecentKeyFrame, cloudOut, timeLaserInfoStamp, mapFrame);
     }
     // publish registered high-res raw cloud
-    if (pubCloudRegisteredRaw.getNumSubscribers() != 0)
+    if (pubCloudRegisteredRaw.getNumSubscribers() != 0 || pubRegisteredCloudLidarFrame.getNumSubscribers() != 0 )
     {
       pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
       pcl::fromROSMsg(cloudInfo.cloud_deskewed, *cloudOut);
+      publishCloud(&pubRegisteredCloudLidarFrame, cloudOut, timeLaserInfoStamp, "os_sensor");
       PointTypePose thisPose6D = trans2PointTypePose(transformTobeMapped);
       *cloudOut = *transformPointCloud(cloudOut, &thisPose6D);
       publishCloud(&pubCloudRegisteredRaw, cloudOut, timeLaserInfoStamp, mapFrame);
