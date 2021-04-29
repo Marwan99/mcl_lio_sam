@@ -1,0 +1,63 @@
+<launch>
+  <!-- Select experiment to run -->
+  <arg name="sensors_bag" default="parking_lot_repeat_stroll_0_2021-03-03-16-40-15.bag" />
+  <arg name="prev_session" default="wed_teach" />
+
+  <!-- <arg name="sensors_bag" default="parking_lot_repeat_stroll_2_2021-03-03-17-56-22.bag" />
+  <arg name="octomap_init" default="repeat_0" /> -->
+
+  <!-- <arg name="sensors_bag" default="parking_lot_repeat_stroll_4_2021-03-03-18-18-05.bag" />
+  <arg name="octomap_init" default="repeat_2" /> -->
+
+  <!-- <arg name="sensors_bag" default="parking_lot_repeat_ours_6_2021-03-03-19-01-55.bag" />
+  <arg name="octomap_init" default="repeat_4" /> -->
+
+  <!-- Random config -->
+  <env name="ROSCONSOLE_CONFIG_FILE" value="$(find lio_sam)/custom_rosconsole.conf"/>
+  <param name="/use_sim_time" value="false"/>
+
+  <!-- Common Parameters -->
+  <rosparam file="$(find lio_sam)/config/params.yaml" command="load"/>
+  <param name="/lio_sam/continueMapping" value="true"/>
+  <param name="/lio_sam/pubTf" value="true"/>
+
+  <param name="/lio_sam/graphFile"            value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/g2o.graph"/>
+  <param name="/lio_sam/keyPosesFile"         value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/key_poses.csv"/>
+  <param name="/lio_sam/surfKeyFramesDir"     value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/surf_key_frames"/>
+  <param name="/lio_sam/cornerKeyFramesDir"   value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/corner_key_frames"/>
+
+  <!-- Run LIO_SAM offline -->
+  <include file="$(find lio_sam)/launch/run_offline.launch" />
+
+  <!-- <node launch-prefix="xterm -e gdb -args" pkg="lio_sam" type="lio_sam_mapOptmization" name="lio_sam_mapOptmization" output="screen" respawn="false"/> -->
+  <node pkg="lio_sam" type="lio_sam_mapOptmization" name="lio_sam_mapOptmization" output="screen" respawn="false"/>
+
+  <!-- Publish sensors -->
+  <node pkg="rosbag" type="play" name="player" args="
+         /media/marwan/external_drive/IROS/wednesday/$(arg sensors_bag)
+         --topic /os_cloud_node/points /encoder_odom /imu/data -r 1 -s 20"/>
+
+  <!-- Run MCL -->
+  <param name="/mcl/publish_tf" type="bool" value="false" />
+  <param name="/mcl/init_x" type="double" value="38.0" />
+  <param name="/mcl/init_y" type="double" value="15.0" />
+  <param name="/mcl/init_yaw" type="double" value="3.14" />
+  <param name="/mcl/trans_thresh" type="double" value="0.5" />
+  <node pkg="mcl" type="mcl_node" name="mcl_node" output="screen">
+    <!-- <remap from="/encoder_odom" to="/lio_sam/mapping/odometry"/> -->
+  </node>
+
+  <!-- Ground removal -->
+  <include file="$(find segmenters_lib)/launch/demo.launch" />
+
+  <arg name="node_start_delay" default="15.0" />
+  <node pkg="octomap_server" type="octomap_server_node" name="octomap_server" output="screen" args="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/octomap.bt" launch-prefix="bash -c 'sleep $(arg node_start_delay); $0 $@' ">
+    <param name="resolution" value="0.15" />
+    <param name="frame_id" type="string" value="map" />
+    <param name="base_frame_id" type="string" value="lidar_link" />
+    <param name="sensor_model/max_range" value="60.0" />
+    <!-- <param name="occupancy_max_z" value="2.5" /> -->
+    <remap from="cloud_in" to="/cloud_nonground" />
+  </node>
+
+</launch>
