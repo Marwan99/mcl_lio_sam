@@ -1,3 +1,0 @@
-<launch>
-  <node pkg="octomap_server" type="octomap_saver" name="octomap_saver" output="screen" args="octo_map.bt"/>
-</launch>
