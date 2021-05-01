@@ -161,6 +161,11 @@ public:
   std::string surfKeyFramesDir;
   std::string graphFile;
 
+  std::string keyPosesFileWrite;
+  std::string cornerKeyFramesDirWrite;
+  std::string surfKeyFramesDirWrite;
+  std::string graphFileWrite;
+
   ParamServer()
   {
     nh.param<std::string>("/robot_id", robot_id, "roboat");
@@ -171,6 +176,10 @@ public:
     nh.param<std::string>("lio_sam/cornerKeyFramesDir", cornerKeyFramesDir, "");
     nh.param<std::string>("lio_sam/surfKeyFramesDir", surfKeyFramesDir, "");
     nh.param<std::string>("lio_sam/graphFile", graphFile, "");
+    nh.param<std::string>("lio_sam/keyPosesFileWrite", keyPosesFileWrite, "");
+    nh.param<std::string>("lio_sam/cornerKeyFramesDirWrite", cornerKeyFramesDirWrite, "");
+    nh.param<std::string>("lio_sam/surfKeyFramesDirWrite", surfKeyFramesDirWrite, "");
+    nh.param<std::string>("lio_sam/graphFileWrite", graphFileWrite, "");
 
     nh.param<std::string>("lio_sam/pointCloudTopic", pointCloudTopic, "points_raw");
     nh.param<std::string>("lio_sam/imuTopic", imuTopic, "imu_correct");

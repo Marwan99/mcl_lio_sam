@@ -324,8 +324,8 @@ public:
     // save surface and corner clouds to PCDs
     ROS_INFO("Saving surface and corner clouds to PCDs...");
     int unused;
-    unused = system(std::string("mkdir -p " + cornerKeyFramesDir).c_str());
-    unused = system(std::string("mkdir -p " + surfKeyFramesDir).c_str());
+    unused = system(std::string("mkdir -p " + cornerKeyFramesDirWrite).c_str());
+    unused = system(std::string("mkdir -p " + surfKeyFramesDirWrite).c_str());
     char file_name_buffer[100];  // xxxxxx.pcd
 
     pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
@@ -338,8 +338,8 @@ public:
       sprintf(file_name_buffer, "/%06d.pcd", i);
       string file_name(file_name_buffer);
 
-      pcl::io::savePCDFileBinary(cornerKeyFramesDir + file_name, *cornerCloudKeyFrames[i]);
-      pcl::io::savePCDFileBinary(surfKeyFramesDir + file_name, *surfCloudKeyFrames[i]);
+      pcl::io::savePCDFileBinary(cornerKeyFramesDirWrite + file_name, *cornerCloudKeyFrames[i]);
+      pcl::io::savePCDFileBinary(surfKeyFramesDirWrite + file_name, *surfCloudKeyFrames[i]);
     }
 
     ROS_INFO("Done!");
@@ -347,7 +347,7 @@ public:
     // save key poses to csv file
     ROS_INFO("Saving key poses to CSV...");
 
-    if (keyPosesFile == "")
+    if (keyPosesFileWrite == "")
     {
       ROS_ERROR("keyPosesFile parameter is not set.");
       return false;
@@ -355,7 +355,7 @@ public:
 
     std::ofstream csv_file;
 
-    csv_file.open(keyPosesFile);
+    csv_file.open(keyPosesFileWrite);
     csv_file << "#timestamp, tx, ty, tz, r, p, y\n";
 
     for (int i = 0; i < cloudKeyPoses6D->size(); i++)
@@ -372,7 +372,7 @@ public:
 
     // save graph
     ROS_INFO("Saving graph...");
-    gtsam::writeG2o(isam->getFactorsUnsafe(), isamCurrentEstimate, graphFile);
+    gtsam::writeG2o(isam->getFactorsUnsafe(), isamCurrentEstimate, graphFileWrite);
     ROS_INFO("Done!");
 
     return true;  // Indicating service succeeded
