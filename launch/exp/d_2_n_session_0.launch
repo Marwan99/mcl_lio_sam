@@ -4,10 +4,10 @@
   <param name="/lio_sam/continueMapping" value="false"/>
   <param name="/lio_sam/pubTf" value="true"/>
 
-  <param name="/lio_sam/graphFile"            value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/g2o.graph"/>
-  <param name="/lio_sam/keyPosesFile"         value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/key_poses.csv"/>
-  <param name="/lio_sam/surfKeyFramesDir"     value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/surf_key_frames"/>
-  <param name="/lio_sam/cornerKeyFramesDir"   value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/corner_key_frames"/>
+  <param name="/lio_sam/graphFileWrite"            value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/g2o.graph"/>
+  <param name="/lio_sam/keyPosesFileWrite"         value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/key_poses.csv"/>
+  <param name="/lio_sam/surfKeyFramesDirWrite"     value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/surf_key_frames"/>
+  <param name="/lio_sam/cornerKeyFramesDirWrite"   value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/corner_key_frames"/>
 
   <include file="$(find lio_sam)/launch/run_offline.launch" />
   <node pkg="lio_sam" type="lio_sam_mapOptmization" name="lio_sam_mapOptmization" output="screen" respawn="true"/>
@@ -17,10 +17,19 @@
     -r 1
     /media/marwan/external_drive/IROS/wednesday/courtyard_wed_afternoon_teach_short.bag" />
 
-  <!-- Ground removal -->
+  <node pkg="octomap_server" type="octomap_server_node" name="object_removal" output="screen">
+    <param name="resolution" value="0.15" />
+    <param name="frame_id" type="string" value="map" />
+    <param name="base_frame_id" type="string" value="lidar_link" />
+    <param name="sensor_model/max_range" value="60.0" />
+    <!-- <param name="occupancy_max_z" value="2.5" /> -->
+    <remap from="cloud_in" to="/lio_sam/mapping/cloud_registered_raw_lidar" />
+  </node>
+
+  <!-- Ground removal from the obstacle-updated octomap -->
   <include file="$(find segmenters_lib)/launch/demo.launch" />
 
-  <node pkg="octomap_server" type="octomap_server_node" name="octomap_server" output="screen">
+  <node pkg="octomap_server" type="octomap_server_node" name="occupancy_proj" ns="occupancy_proj" output="screen">
     <param name="resolution" value="0.15" />
     <param name="frame_id" type="string" value="map" />
     <param name="base_frame_id" type="string" value="lidar_link" />
