@@ -4,10 +4,7 @@
   <param name="/lio_sam/continueMapping" value="false"/>
   <param name="/lio_sam/pubTf" value="true"/>
 
-  <param name="/lio_sam/graphFileWrite"            value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/g2o.graph"/>
-  <param name="/lio_sam/keyPosesFileWrite"         value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/key_poses.csv"/>
-  <param name="/lio_sam/surfKeyFramesDirWrite"     value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/surf_key_frames"/>
-  <param name="/lio_sam/cornerKeyFramesDirWrite"   value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach/corner_key_frames"/>
+  <param name="/lio_sam/saveDir" value="/home/marwan/fyp/lt_experiments/d_2_n/wed_teach"/>
 
   <include file="$(find lio_sam)/launch/run_offline.launch" />
   <node pkg="lio_sam" type="lio_sam_mapOptmization" name="lio_sam_mapOptmization" output="screen" respawn="true"/>

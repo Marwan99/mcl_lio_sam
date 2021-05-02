@@ -219,7 +219,7 @@ public:
       char temp_char;
 
       std::ifstream csv_file;
-      csv_file.open(keyPosesFile);
+      csv_file.open(readDir + "/key_poses.csv");
 
       // Skipping header file in CSV file
       std::string temp_str;
@@ -228,6 +228,9 @@ public:
       PointType thisPose3D;
       PointTypePose thisPose6D;
       char file_name_buffer[16];  // xxxxxx.pcd
+
+      std::string cornerKeyFramesDir = readDir + "/corner_key_frames";
+      std::string surfKeyFramesDir = readDir + "/surf_key_frames";
 
       for (uint32_t i = 0; !csv_file.eof() && ros::ok(); i++)
       {
@@ -281,7 +284,7 @@ public:
       // TODO: double check this model for potential problems
       Values::shared_ptr initial;
       NonlinearFactorGraph::shared_ptr temp_graph;
-      boost::tie(temp_graph, initial) = gtsam::readG2o(graphFile, true);
+      boost::tie(temp_graph, initial) = gtsam::readG2o(readDir + "/g2o.graph", true);
       ROS_INFO("Done!");
       ROS_INFO("First optimisation...");
       gtsam::noiseModel::Diagonal::shared_ptr priorModel =
@@ -326,8 +329,12 @@ public:
     // save surface and corner clouds to PCDs
     ROS_INFO("Saving surface and corner clouds to PCDs...");
     int unused;
-    unused = system(std::string("mkdir -p " + cornerKeyFramesDirWrite).c_str());
-    unused = system(std::string("mkdir -p " + surfKeyFramesDirWrite).c_str());
+
+    std::string cornerKeyFramesDir = saveDir + "/corner_key_frames";
+    std::string surfKeyFramesDir = saveDir + "/surf_key_frames";
+
+    unused = system(std::string("mkdir -p " + cornerKeyFramesDir).c_str());
+    unused = system(std::string("mkdir -p " + surfKeyFramesDir).c_str());
     char file_name_buffer[100];  // xxxxxx.pcd
 
     pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
@@ -340,8 +347,8 @@ public:
       sprintf(file_name_buffer, "/%06d.pcd", i);
       string file_name(file_name_buffer);
 
-      pcl::io::savePCDFileBinary(cornerKeyFramesDirWrite + file_name, *cornerCloudKeyFrames[i]);
-      pcl::io::savePCDFileBinary(surfKeyFramesDirWrite + file_name, *surfCloudKeyFrames[i]);
+      pcl::io::savePCDFileBinary(cornerKeyFramesDir + file_name, *cornerCloudKeyFrames[i]);
+      pcl::io::savePCDFileBinary(surfKeyFramesDir + file_name, *surfCloudKeyFrames[i]);
     }
 
     ROS_INFO("Done!");
@@ -349,15 +356,9 @@ public:
     // save key poses to csv file
     ROS_INFO("Saving key poses to CSV...");
 
-    if (keyPosesFileWrite == "")
-    {
-      ROS_ERROR("keyPosesFile parameter is not set.");
-      return false;
-    }
-
     std::ofstream csv_file;
 
-    csv_file.open(keyPosesFileWrite);
+    csv_file.open(saveDir + "/key_poses.csv");
     csv_file << "#timestamp, tx, ty, tz, r, p, y\n";
 
     for (int i = 0; i < cloudKeyPoses6D->size(); i++)
@@ -374,7 +375,12 @@ public:
 
     // save graph
     ROS_INFO("Saving graph...");
-    gtsam::writeG2o(isam->getFactorsUnsafe(), isamCurrentEstimate, graphFileWrite);
+    gtsam::writeG2o(isam->getFactorsUnsafe(), isamCurrentEstimate, saveDir + "/g2o.graph");
+
+    // Save dot file for visualization
+    std::ofstream graphviz;
+    graphviz.open(saveDir + "/graphviz.dot");
+    isam->getFactorsUnsafe().saveGraph(graphviz);
     ROS_INFO("Done!");
 
     return true;  // Indicating service succeeded

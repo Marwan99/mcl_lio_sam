@@ -25,14 +25,8 @@
   <param name="/lio_sam/continueMapping" value="true"/>
   <param name="/lio_sam/pubTf" value="true"/>
 
-  <param name="/lio_sam/graphFile"            value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/g2o.graph"/>
-  <param name="/lio_sam/keyPosesFile"         value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/key_poses.csv"/>
-  <param name="/lio_sam/surfKeyFramesDir"     value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/surf_key_frames"/>
-  <param name="/lio_sam/cornerKeyFramesDir"   value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)/corner_key_frames"/>
-  <param name="/lio_sam/graphFileWrite"            value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg cur_session)/g2o.graph"/>
-  <param name="/lio_sam/keyPosesFileWrite"         value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg cur_session)/key_poses.csv"/>
-  <param name="/lio_sam/surfKeyFramesDirWrite"     value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg cur_session)/surf_key_frames"/>
-  <param name="/lio_sam/cornerKeyFramesDirWrite"   value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg cur_session)/corner_key_frames"/>
+  <param name="/lio_sam/readDir" value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg prev_session)"/>
+  <param name="/lio_sam/saveDir" value="/home/marwan/fyp/lt_experiments/d_2_n/$(arg cur_session)"/>
 
   <!-- Run LIO_SAM offline -->
   <include file="$(find lio_sam)/launch/run_offline.launch" />

@@ -156,15 +156,8 @@ public:
   // long-term mapping
   bool continueMapping;
   bool pubTf;
-  std::string keyPosesFile;
-  std::string cornerKeyFramesDir;
-  std::string surfKeyFramesDir;
-  std::string graphFile;
-
-  std::string keyPosesFileWrite;
-  std::string cornerKeyFramesDirWrite;
-  std::string surfKeyFramesDirWrite;
-  std::string graphFileWrite;
+  std::string readDir;
+  std::string saveDir;
 
   ParamServer()
   {
@@ -172,14 +165,8 @@ public:
 
     nh.param<bool>("lio_sam/continueMapping", continueMapping, false);
     nh.param<bool>("lio_sam/pubTf", pubTf, true);
-    nh.param<std::string>("lio_sam/keyPosesFile", keyPosesFile, "");
-    nh.param<std::string>("lio_sam/cornerKeyFramesDir", cornerKeyFramesDir, "");
-    nh.param<std::string>("lio_sam/surfKeyFramesDir", surfKeyFramesDir, "");
-    nh.param<std::string>("lio_sam/graphFile", graphFile, "");
-    nh.param<std::string>("lio_sam/keyPosesFileWrite", keyPosesFileWrite, "");
-    nh.param<std::string>("lio_sam/cornerKeyFramesDirWrite", cornerKeyFramesDirWrite, "");
-    nh.param<std::string>("lio_sam/surfKeyFramesDirWrite", surfKeyFramesDirWrite, "");
-    nh.param<std::string>("lio_sam/graphFileWrite", graphFileWrite, "");
+    nh.param<std::string>("lio_sam/readDir", readDir, "");
+    nh.param<std::string>("lio_sam/saveDir", saveDir, "");
 
     nh.param<std::string>("lio_sam/pointCloudTopic", pointCloudTopic, "points_raw");
     nh.param<std::string>("lio_sam/imuTopic", imuTopic, "imu_correct");
