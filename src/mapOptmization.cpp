@@ -1690,8 +1690,19 @@ public:
     nav_msgs::Odometry odom_msg;
 
     odom_msg = mclQueue.back();
+    // odom_msg = mclQueue.front();
+    // mclQueue.pop_front();
 
-    if (odom_msg.pose.covariance[35] < 0.01 || odom_msg.pose.covariance[0] < 0.01 || odom_msg.pose.covariance[7] < 0.01)
+    if (odom_msg.pose.covariance[0] > 0.5 || odom_msg.pose.covariance[7] > 0.5)
+    {
+      ROS_WARN_STREAM("Ignoring MCL factor, high cov. yaw: " << odom_msg.pose.covariance[35]
+                                                             << ", x:" << odom_msg.pose.covariance[0]
+                                                             << ", y:" << odom_msg.pose.covariance[7]);
+      return false;
+    }
+
+    if (odom_msg.pose.covariance[35] < 0.00001 || odom_msg.pose.covariance[0] < 0.00001 || odom_msg.pose.covariance[7] < 0.00001)
+    // if (odom_msg.pose.covariance[35] < 0.01 || odom_msg.pose.covariance[0] < 0.01 || odom_msg.pose.covariance[7] < 0.01)
     {
       ROS_WARN_STREAM("Ignoring MCL factor, super low cov. yaw: " << odom_msg.pose.covariance[35]
                                                                 << ", x:" << odom_msg.pose.covariance[0]
@@ -1718,14 +1729,27 @@ public:
     // Should at least be used in initializing the estimate of the initial pose in a new mapping session.
     if (use_mcl_for_init)
     {
-      // TODO: set the roll and pitch using the imu data. 
-      gtsam::Pose3 mcl_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, yaw),
-                            gtsam::Point3(pose_map_msg.pose.position.x, pose_map_msg.pose.position.y, 0.0));
+      std::vector<int> pointSearchInd;
+      std::vector<float> pointSearchSqDis;
 
-      noiseModel::Diagonal::shared_ptr priorNoise =
-          noiseModel::Diagonal::Variances((Vector(6) << 1e-2, 1e-2, odom_msg.pose.covariance[35],
-                                           odom_msg.pose.covariance[0], odom_msg.pose.covariance[7], 1e-2)
-                                              .finished());
+      PointType search_point;
+      search_point.x = pose_map_msg.pose.position.x;
+      search_point.y = pose_map_msg.pose.position.y;
+
+      // extract nearest point to get an estimation for the z height
+      kdtreeSurroundingKeyPoses->setInputCloud(cloudKeyPoses3D);  // create kd-tree
+      kdtreeSurroundingKeyPoses->nearestKSearch(search_point, 1, pointSearchInd, pointSearchSqDis);
+
+      // TODO: set the roll and pitch using the imu data.
+      gtsam::Pose3 mcl_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, yaw),
+                            gtsam::Point3(pose_map_msg.pose.position.x, pose_map_msg.pose.position.y,
+                                          cloudKeyPoses3D->points[pointSearchInd[0]].z));
+
+      // noise convention: https://github.com/borglab/gtsam/issues/160
+      // r, p, y, x, y, z
+      noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Variances(
+          (Vector(6) << 0.5, 0.5, 0.5, odom_msg.pose.covariance[0] * 10, odom_msg.pose.covariance[7] * 10, 0.3)
+              .finished());
 
       gtSAMgraph.add(PriorFactor<Pose3>(cloudKeyPoses3D->size(), mcl_pose, priorNoise));
 
@@ -1751,10 +1775,10 @@ public:
           gtsam::Rot3::RzRyRx((double)cloudInfo.imuRollInit, (double)cloudInfo.imuPitchInit, yaw),
           gtsam::Point3(pose_map_msg.pose.position.x, pose_map_msg.pose.position.y, latestEstimate.translation().z()));
 
-      ROS_ERROR_STREAM(odom_msg.pose.covariance[35] * 10 << " " << odom_msg.pose.covariance[0] * 5 << " "
-                                                         << odom_msg.pose.covariance[7] * 5);
+      ROS_ERROR_STREAM(odom_msg.pose.covariance[0] << " " << odom_msg.pose.covariance[7] << " "
+                                                    << odom_msg.pose.covariance[35]);
       noiseModel::Diagonal::shared_ptr priorNoise =
-          noiseModel::Diagonal::Variances((Vector(6) << 1e-2, 1e-2, odom_msg.pose.covariance[35] * 10,
+          noiseModel::Diagonal::Variances((Vector(6) << 0.5, 0.5, odom_msg.pose.covariance[35] * 10,
                                            odom_msg.pose.covariance[0] * 5, odom_msg.pose.covariance[7] * 5, 1.5)
                                               .finished());
       gtSAMgraph.add(PriorFactor<Pose3>(cloudKeyPoses3D->size(), mcl_pose, priorNoise));
@@ -2012,7 +2036,8 @@ public:
       publishCloud(&pubRecentKeyFrame, cloudOut, timeLaserInfoStamp, mapFrame);
     }
     // publish registered high-res raw cloud
-    if ((pubCloudRegisteredRaw.getNumSubscribers() != 0 || pubRegisteredCloudLidarFrame.getNumSubscribers() != 0 ) && start_publishing_ocotmap_cloud)
+    if ((pubCloudRegisteredRaw.getNumSubscribers() != 0 || pubRegisteredCloudLidarFrame.getNumSubscribers() != 0) &&
+        start_publishing_ocotmap_cloud)
     {
       pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
       pcl::fromROSMsg(cloudInfo.cloud_deskewed, *cloudOut);
